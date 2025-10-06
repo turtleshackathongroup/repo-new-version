@@ -33,20 +33,18 @@ export function ExplanationPanel({ explanation, disclaimer }: ExplanationPanelPr
           <div>
             <h4 className="font-medium text-foreground mb-2">Data Sources</h4>
             <ul className="space-y-1 text-muted-foreground list-disc list-inside">
-              <li>NASA Earth Observations (NEO) - Temperature & Precipitation</li>
-              <li>NOAA Climate Data - Historical Weather Patterns</li>
-              <li>ERA5 Reanalysis - Wind Speed & Humidity</li>
-              <li>MODIS - Surface Temperature & Cloud Cover</li>
+              <li>NASA POWER (Prediction Of Worldwide Energy Resources) hourly point API</li>
+              <li>Parameters: T2M (air temperature), WS2M (wind speed), RH2M (relative humidity), PRECTOTCORR (precipitation)</li>
             </ul>
           </div>
 
           <div>
             <h4 className="font-medium text-foreground mb-2">Calculation Method</h4>
             <ul className="space-y-1 text-muted-foreground list-disc list-inside">
-              <li>Historical climatology analysis (30-year baseline)</li>
-              <li>Threshold exceedance probability calculation</li>
-              <li>Confidence intervals based on data quality & coverage</li>
-              <li>Heat index & wind chill computed from temperature & humidity</li>
+              <li>Fetches the NASA POWER hourly observation closest to the requested time</li>
+              <li>Falls back to same-day hourly aggregates when the exact hour is unavailable</li>
+              <li>Compares observations against the risk thresholds you configure</li>
+              <li>Heat index & discomfort metrics derived from temperature and humidity</li>
             </ul>
           </div>
 

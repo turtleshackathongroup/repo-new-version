@@ -4,7 +4,7 @@ export function Footer() {
       <div className="container mx-auto px-4 py-6 max-w-7xl">
         <div className="flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-muted-foreground">
           <div>
-            <p>Data sources: NASA Earth Observations, NOAA Climate Data, ERA5 Reanalysis</p>
+            <p>Data source: NASA POWER (Prediction Of Worldwide Energy Resources) hourly point API</p>
           </div>
           <div className="text-center md:text-right">
             <p className="font-medium">NASA International Space Apps Challenge 2025</p>
