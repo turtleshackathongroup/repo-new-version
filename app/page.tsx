@@ -11,6 +11,8 @@ import { ExplanationPanel } from "@/components/explanation-panel"
 import { Footer } from "@/components/footer"
 import { Cloud } from "lucide-react"
 import { TemperatureMap } from "@/components/temperature-map"
+import NasaSnapshotMap from "@/components/NasaSnapshotMap"
+import { Card } from "@/components/ui/card"
 import type { ApiResponse, QueryParams } from "@/types"
 
 export default function Home() {
@@ -144,6 +146,10 @@ export default function Home() {
                   lon={results.meta.lon}
                   locationName={results.meta.locationName}
                 />
+                <Card className="bg-card border-border p-6">
+                  <h3 className="text-lg font-semibold text-foreground mb-4">NASA Satellite Snapshot</h3>
+                  <NasaSnapshotMap lat={results.meta.lat} lon={results.meta.lon} dateISO={results.meta.startDate} />
+                </Card>
                 <ExplanationPanel explanation={results.explanation} disclaimer={results.disclaimer} />
               </>
             )}
