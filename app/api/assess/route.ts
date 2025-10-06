@@ -17,6 +17,9 @@ interface OpenMeteoResponse {
 const CELSIUS_TO_FAHRENHEIT = (value: number) => (value * 9) / 5 + 32
 const FAHRENHEIT_TO_CELSIUS = (value: number) => ((value - 32) * 5) / 9
 const MS_TO_MPH = (value: number) => value * 2.236936
+const MPH_TO_MS = (value: number) => value / 2.236936
+const KMH_TO_MPH = (value: number) => value * 0.621371
+const KNOTS_TO_MPH = (value: number) => value * 1.15078
 const MM_TO_IN = (value: number) => value / 25.4
 const roundTo = (value: number, decimals = 1) => Number(value.toFixed(decimals))
 
@@ -150,7 +153,180 @@ export async function GET(request: NextRequest) {
 
     const targetTimePart = time.includes(":") ? time : `${time}:00`
     const targetTimestamp = `${startDate}T${targetTimePart}`
+    const normalizedTargetTimestamp = normalizeTimeString(targetTimestamp)
     const targetMs = parseTimestamp(targetTimestamp)
+
+    const parseWindSpeedString = (value: string | undefined) => {
+      if (!value) {
+        return undefined
+      }
+
+      const match = value.match(/(?<first>\d+)(?:\s*(?:to|-)\s*(?<second>\d+))?/i)
+
+      if (!match || !match.groups) {
+        return undefined
+      }
+
+      const first = Number.parseFloat(match.groups.first ?? "")
+      const second = Number.parseFloat(match.groups.second ?? "")
+
+      if (Number.isFinite(first) && Number.isFinite(second)) {
+        return (first + second) / 2
+      }
+
+      if (Number.isFinite(first)) {
+        return first
+      }
+
+      return undefined
+    }
+
+    const fetchNwsGustMph = async () => {
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        return undefined
+      }
+
+      const headers = {
+        "User-Agent": "SpaceAppsPrototype/1.0 (contact@example.com)",
+        Accept: "application/geo+json",
+      }
+
+      try {
+        const pointsResponse = await fetch(
+          `https://api.weather.gov/points/${lat.toFixed(4)},${lon.toFixed(4)}`,
+          { headers, next: { revalidate: 10 * 60 } },
+        )
+
+        if (!pointsResponse.ok) {
+          return undefined
+        }
+
+        const pointsJson = (await pointsResponse.json()) as {
+          properties?: { forecastHourly?: string }
+        }
+
+        const forecastUrl = pointsJson?.properties?.forecastHourly
+
+        if (!forecastUrl) {
+          return undefined
+        }
+
+        const forecastResponse = await fetch(forecastUrl, {
+          headers,
+          next: { revalidate: 10 * 60 },
+        })
+
+        if (!forecastResponse.ok) {
+          return undefined
+        }
+
+        const forecastJson = (await forecastResponse.json()) as {
+          properties?: {
+            periods?: Array<{
+              startTime?: string
+              endTime?: string
+              windGust?: { value: number | null; unitCode?: string } | null
+              windSpeed?: string | null
+            }>
+          }
+        }
+
+        const periods = Array.isArray(forecastJson?.properties?.periods)
+          ? forecastJson?.properties?.periods ?? []
+          : []
+
+        if (!normalizedTargetTimestamp || periods.length === 0) {
+          return undefined
+        }
+
+        const targetMs = Date.parse(normalizedTargetTimestamp)
+
+        if (!Number.isFinite(targetMs)) {
+          return undefined
+        }
+
+        const bestPeriod = periods.reduce<
+          | undefined
+          | {
+              startMs: number
+              gustValue?: number
+              unitCode?: string
+              windSpeed?: string | null
+            }
+        >((best, period) => {
+          const startMs = Date.parse(normalizeTimeString(period.startTime ?? ""))
+
+          if (!Number.isFinite(startMs)) {
+            return best
+          }
+
+          const distance = Math.abs(startMs - targetMs)
+          const bestDistance = best ? Math.abs(best.startMs - targetMs) : Number.POSITIVE_INFINITY
+
+          if (distance < bestDistance || (distance === bestDistance && best && startMs > best.startMs)) {
+            return {
+              startMs,
+              gustValue: period.windGust?.value ?? undefined,
+              unitCode: period.windGust?.unitCode ?? undefined,
+              windSpeed: period.windSpeed ?? null,
+            }
+          }
+
+          if (!best) {
+            return {
+              startMs,
+              gustValue: period.windGust?.value ?? undefined,
+              unitCode: period.windGust?.unitCode ?? undefined,
+              windSpeed: period.windSpeed ?? null,
+            }
+          }
+
+          return best
+        }, undefined)
+
+        if (!bestPeriod) {
+          return undefined
+        }
+
+        const convertGustValue = (value: number | undefined, unitCode?: string) => {
+          if (!Number.isFinite(value ?? NaN)) {
+            return undefined
+          }
+
+          const gust = value as number
+
+          switch (unitCode) {
+            case "wmoUnit:km_h":
+            case "km_h":
+              return KMH_TO_MPH(gust)
+            case "wmoUnit:m_s":
+            case "m_s":
+              return MS_TO_MPH(gust)
+            case "wmoUnit:kn":
+            case "knots":
+              return KNOTS_TO_MPH(gust)
+            case "wmoUnit:mi_h":
+            case "mph":
+            case undefined:
+              return gust
+            default:
+              return gust
+          }
+        }
+
+        const gustMph = convertGustValue(bestPeriod.gustValue, bestPeriod.unitCode)
+
+        if (gustMph !== undefined && Number.isFinite(gustMph)) {
+          return gustMph
+        }
+
+        const fallbackWindSpeed = parseWindSpeedString(bestPeriod.windSpeed ?? undefined)
+        return fallbackWindSpeed ?? undefined
+      } catch (error) {
+        console.warn("Failed to fetch NWS gust data", error)
+        return undefined
+      }
+    }
 
     const targetIndex = times.reduce((bestIndex, current, index) => {
       if (!current) {
@@ -214,6 +390,41 @@ export async function GET(request: NextRequest) {
         .filter((value): value is number => value !== undefined)
     }
 
+    const getNearestSeriesValue = (
+      series: number[] | undefined,
+      targetIndex: number,
+      candidateIndices: number[],
+    ) => {
+      if (!series || candidateIndices.length === 0) {
+        return undefined
+      }
+
+      let bestIndex = -1
+      let bestDistance = Number.POSITIVE_INFINITY
+      let bestValue: number | undefined
+
+      for (const index of candidateIndices) {
+        const value = getSeriesValue(series, index)
+
+        if (value === undefined) {
+          continue
+        }
+
+        const distance = Math.abs(index - targetIndex)
+
+        if (
+          distance < bestDistance ||
+          (distance === bestDistance && bestIndex !== -1 && index > bestIndex)
+        ) {
+          bestIndex = index
+          bestDistance = distance
+          bestValue = value
+        }
+      }
+
+      return bestValue
+    }
+
     const temperatureSeries = hourly?.temperature_2m
     const apparentSeries = hourly?.apparent_temperature
     const humiditySeries = hourly?.relative_humidity_2m
@@ -226,6 +437,7 @@ export async function GET(request: NextRequest) {
     const selectedHumidity = getSeriesValue(humiditySeries, resolvedTargetIndex)
     const selectedPrecipMm = getSeriesValue(precipSeries, resolvedTargetIndex)
     const selectedWindMs = getSeriesValue(windSeries, resolvedTargetIndex)
+    const selectedGustMs = getSeriesValue(gustSeries, resolvedTargetIndex)
 
     const dayTemperaturesC = gatherSeriesValues(temperatureSeries)
     const dayHumidity = gatherSeriesValues(humiditySeries)
@@ -248,7 +460,24 @@ export async function GET(request: NextRequest) {
 
     const maxTempC = dayTemperaturesC.length > 0 ? Math.max(...dayTemperaturesC) : temperatureC
     const minTempC = dayTemperaturesC.length > 0 ? Math.min(...dayTemperaturesC) : temperatureC
-    const gustMs = dayGustsMs.length > 0 ? Math.max(...dayGustsMs) : windSpeedMs
+    const nwsGustMph = await fetchNwsGustMph()
+
+    const gustMs = (() => {
+      const gustFromNws =
+        nwsGustMph !== undefined && Number.isFinite(nwsGustMph) ? MPH_TO_MS(nwsGustMph) : undefined
+
+      if (gustFromNws !== undefined) {
+        return gustFromNws
+      }
+
+      return (
+        selectedGustMs ??
+        getNearestSeriesValue(gustSeries, resolvedTargetIndex, dayIndices) ??
+        (dayGustsMs.length > 0
+          ? dayGustsMs.reduce((acc, value) => acc + value, 0) / dayGustsMs.length
+          : windSpeedMs)
+      )
+    })()
     const totalPrecipMm = dayPrecipMm.reduce((acc, value) => acc + value, 0)
 
     const temperature = unitsTemp === "F" ? CELSIUS_TO_FAHRENHEIT(temperatureC) : temperatureC
@@ -324,7 +553,7 @@ export async function GET(request: NextRequest) {
         },
       ],
       explanation:
-        "Observations are sourced from the Open-Meteo API using the selected date, time, and coordinates. Probabilities reflect how the observed conditions relate to your configured thresholds.",
+        "Observations source temperature, humidity, precipitation, and sustained wind from the Open-Meteo API, with wind gusts supplemented by the National Weather Service to better match on-the-ground conditions. Probabilities reflect how the observed conditions relate to your configured thresholds.",
       disclaimer: "Prototype for Space Apps; not for operational forecasting.",
     }
 
