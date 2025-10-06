@@ -13,6 +13,13 @@ import { CalendarIcon, Clock, MapPin, ChevronDown, ChevronRight, Sliders, Thermo
 import { format } from "date-fns"
 import type { QueryParams } from "@/types"
 import { cn } from "@/lib/utils"
+import {
+  convertPrecipThreshold,
+  convertTemperatureThreshold,
+  convertWindThreshold,
+  getDefaultThresholds,
+  normalizeThresholdInput,
+} from "@/lib/thresholds"
 
 interface QueryFormProps {
   onSubmit: (params: QueryParams) => void
@@ -38,13 +45,52 @@ export function QueryForm({ onSubmit, loading }: QueryFormProps) {
   const [unitsTemp, setUnitsTemp] = useState<"C" | "F">("F")
   const [unitsWind, setUnitsWind] = useState<"MS" | "MPH">("MPH")
   const [showThresholds, setShowThresholds] = useState(false)
-  const [thresholds, setThresholds] = useState({
-    hot: 35,
-    cold: 0,
-    windy: 10,
-    wet: 10,
-    uncomfortable: 32,
-  })
+  const [thresholds, setThresholds] = useState(() => getDefaultThresholds("F", "MPH"))
+  const previousTempUnit = useRef<"C" | "F">("F")
+  const previousWindUnit = useRef<"MS" | "MPH">("MPH")
+  const handleThresholdChange = (key: keyof typeof thresholds) => (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const { value } = event.target
+
+    setThresholds((prev) => ({
+      ...prev,
+      [key]: normalizeThresholdInput(value, prev[key]),
+    }))
+  }
+
+  useEffect(() => {
+    if (previousTempUnit.current === unitsTemp) {
+      return
+    }
+
+    setThresholds((prev) => ({
+      ...prev,
+      hot: convertTemperatureThreshold(prev.hot, previousTempUnit.current, unitsTemp),
+      cold: convertTemperatureThreshold(prev.cold, previousTempUnit.current, unitsTemp),
+      uncomfortable: convertTemperatureThreshold(
+        prev.uncomfortable,
+        previousTempUnit.current,
+        unitsTemp,
+      ),
+      wet: convertPrecipThreshold(prev.wet, previousTempUnit.current, unitsTemp),
+    }))
+
+    previousTempUnit.current = unitsTemp
+  }, [unitsTemp])
+
+  useEffect(() => {
+    if (previousWindUnit.current === unitsWind) {
+      return
+    }
+
+    setThresholds((prev) => ({
+      ...prev,
+      windy: convertWindThreshold(prev.windy, previousWindUnit.current, unitsWind),
+    }))
+
+    previousWindUnit.current = unitsWind
+  }, [unitsWind])
 
   interface GeocodingSuggestion {
     id: string
@@ -229,13 +275,9 @@ export function QueryForm({ onSubmit, loading }: QueryFormProps) {
     setShowRange(false)
     setUnitsTemp("F")
     setUnitsWind("MPH")
-    setThresholds({
-      hot: 35,
-      cold: 0,
-      windy: 10,
-      wet: 10,
-      uncomfortable: 32,
-    })
+    previousTempUnit.current = "F"
+    previousWindUnit.current = "MPH"
+    setThresholds(getDefaultThresholds("F", "MPH"))
   }
 
   return (
@@ -589,7 +631,7 @@ export function QueryForm({ onSubmit, loading }: QueryFormProps) {
                         id="thresholdHot"
                         type="number"
                         value={thresholds.hot}
-                        onChange={(e) => setThresholds({ ...thresholds, hot: Number.parseFloat(e.target.value) })}
+                        onChange={handleThresholdChange("hot")}
                         className="text-sm bg-card transition-all duration-200 focus:border-primary"
                       />
                       <span className="text-xs text-muted-foreground">°{unitsTemp}</span>
@@ -604,7 +646,7 @@ export function QueryForm({ onSubmit, loading }: QueryFormProps) {
                         id="thresholdCold"
                         type="number"
                         value={thresholds.cold}
-                        onChange={(e) => setThresholds({ ...thresholds, cold: Number.parseFloat(e.target.value) })}
+                        onChange={handleThresholdChange("cold")}
                         className="text-sm bg-card transition-all duration-200 focus:border-primary"
                       />
                       <span className="text-xs text-muted-foreground">°{unitsTemp}</span>
@@ -619,7 +661,7 @@ export function QueryForm({ onSubmit, loading }: QueryFormProps) {
                         id="thresholdWindy"
                         type="number"
                         value={thresholds.windy}
-                        onChange={(e) => setThresholds({ ...thresholds, windy: Number.parseFloat(e.target.value) })}
+                        onChange={handleThresholdChange("windy")}
                         className="text-sm bg-card transition-all duration-200 focus:border-primary"
                       />
                       <span className="text-xs text-muted-foreground">{unitsWind === "MS" ? "m/s" : "mph"}</span>
@@ -634,10 +676,12 @@ export function QueryForm({ onSubmit, loading }: QueryFormProps) {
                         id="thresholdWet"
                         type="number"
                         value={thresholds.wet}
-                        onChange={(e) => setThresholds({ ...thresholds, wet: Number.parseFloat(e.target.value) })}
+                        onChange={handleThresholdChange("wet")}
                         className="text-sm bg-card transition-all duration-200 focus:border-primary"
                       />
-                      <span className="text-xs text-muted-foreground">mm</span>
+                      <span className="text-xs text-muted-foreground">
+                        {unitsTemp === "F" ? "in" : "mm"}
+                      </span>
                     </div>
                   </div>
                 </div>
