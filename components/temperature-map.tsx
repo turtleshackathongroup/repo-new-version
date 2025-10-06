@@ -46,26 +46,20 @@ export function TemperatureMap({ drivers, tempUnit, lat, lon, locationName }: Te
       const mapElement = document.getElementById("temperature-map")
       if (!mapElement) return
 
-      map = L.map(mapElement, {
-        maxZoom: 8,
-        minZoom: 1,
-      }).setView([lat, lon], 6)
+      map = L.map(mapElement).setView([lat, lon], 6)
 
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
         opacity: 0.7,
       }).addTo(map)
 
-      // NASA GIBS land surface temperature layer (Celsius)
+      // This provides actual real-time temperature data from weather stations
       L.tileLayer(
-        "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_Land_Surface_Temp_Day_C/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png",
+        "https://tile.openweathermap.org/map/temp_new/{z}/{x}/{y}.png?appid=8d3f4ca3ba012c87309e0b8ecb37be1b",
         {
-          attribution:
-            'Temperature imagery courtesy of NASA EOSDIS LANCE and GIBS/Worldview',
+          attribution: 'Temperature data &copy; <a href="https://openweathermap.org">OpenWeatherMap</a>',
           opacity: 0.6,
-          tileSize: 256,
-          maxZoom: 8,
-          minZoom: 1,
+          maxZoom: 19,
         },
       ).addTo(map)
 
@@ -131,7 +125,7 @@ export function TemperatureMap({ drivers, tempUnit, lat, lon, locationName }: Te
           {/* Legend overlay */}
           <div className="absolute bottom-4 right-4 bg-card/95 backdrop-blur-sm rounded-lg px-4 py-3 shadow-lg border border-border z-[1000]">
             <p className="text-xs font-semibold mb-2 text-foreground">Temperature Overlay</p>
-            <p className="text-[10px] text-muted-foreground mb-2">NASA GIBS Land Surface Temperature (°C)</p>
+            <p className="text-[10px] text-muted-foreground mb-2">Real-time data from weather stations</p>
             <div className="flex gap-1">
               <div className="flex flex-col items-center">
                 <div className="w-6 h-6 rounded" style={{ background: "#9d5cff" }} />
