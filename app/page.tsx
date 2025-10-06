@@ -17,106 +17,36 @@ export default function Home() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [results, setResults] = useState<ApiResponse | null>(null)
-  const [mockMode, setMockMode] = useState(true)
 
   const handleSubmit = async (params: QueryParams) => {
     setLoading(true)
     setError(null)
 
     try {
-      if (mockMode) {
-        // Simulate API delay
-        await new Promise((resolve) => setTimeout(resolve, 800))
+      const queryString = new URLSearchParams({
+        lat: params.lat.toString(),
+        lon: params.lon.toString(),
+        startDate: params.startDate,
+        time: params.time,
+        ...(params.endDate && { endDate: params.endDate }),
+        unitsTemp: params.unitsTemp,
+        unitsWind: params.unitsWind,
+        thresholdHot: params.thresholds.hot.toString(),
+        thresholdCold: params.thresholds.cold.toString(),
+        thresholdWindy: params.thresholds.windy.toString(),
+        thresholdWet: params.thresholds.wet.toString(),
+        thresholdUncomfortable: params.thresholds.uncomfortable.toString(),
+        ...(params.locationName && { locationName: params.locationName }),
+      }).toString()
 
-        // Use mock data
-        const mockResponse: ApiResponse = {
-          meta: {
-            locationName: params.locationName || "San Ramon, CA",
-            lat: params.lat,
-            lon: params.lon,
-            startDate: params.startDate,
-            endDate: params.endDate || params.startDate,
-            observationTime: `${params.startDate}T${params.time}`,
-            units: {
-              temp: params.unitsTemp,
-              wind: params.unitsWind,
-            },
-          },
-          risks: [
-            { type: "very_hot", label: "Very Hot", probability: 0.27, confidence: "medium" },
-            { type: "very_cold", label: "Very Cold", probability: 0.04, confidence: "high" },
-            { type: "very_windy", label: "Very Windy", probability: 0.18, confidence: "low" },
-            { type: "very_wet", label: "Very Wet", probability: 0.12, confidence: "medium" },
-            { type: "very_uncomfortable", label: "Very Uncomfortable", probability: 0.33, confidence: "medium" },
-          ],
-          drivers: [
-            { name: "Temperature", value: params.unitsTemp === "F" ? 82 : 28, unit: `°${params.unitsTemp}` },
-            { name: "Max Temp", value: params.unitsTemp === "F" ? 96 : 36, unit: `°${params.unitsTemp}` },
-            { name: "Min Temp", value: params.unitsTemp === "F" ? 58 : 14, unit: `°${params.unitsTemp}` },
-            {
-              name: "Feels Like",
-              value: params.unitsTemp === "F" ? 88 : 31,
-              unit: `°${params.unitsTemp}`,
-            },
-            {
-              name: "Wind Speed",
-              value: params.unitsWind === "MPH" ? 12 : 5.4,
-              unit: params.unitsWind === "MPH" ? "MPH" : "m/s",
-            },
-            {
-              name: "Gusts",
-              value: params.unitsWind === "MPH" ? 26 : 11.6,
-              unit: params.unitsWind === "MPH" ? "MPH" : "m/s",
-            },
-            {
-              name: "Humidity",
-              value: 62,
-              unit: "%",
-            },
-            {
-              name: "Hourly Precip",
-              value: params.unitsTemp === "F" ? 0.05 : 1.3,
-              unit: params.unitsTemp === "F" ? "in" : "mm",
-            },
-            {
-              name: "Daily Precip",
-              value: params.unitsTemp === "F" ? 0.15 : 3.8,
-              unit: params.unitsTemp === "F" ? "in" : "mm",
-            },
-          ],
-          explanation:
-            "Probabilities are derived from historical and/or Earth observation data for the selected date window.",
-          disclaimer: "Prototype for Space Apps; not for operational forecasting.",
-        }
+      const response = await fetch(`/api/assess?${queryString}`)
 
-        setResults(mockResponse)
-      } else {
-        // Real API call
-        const queryString = new URLSearchParams({
-          lat: params.lat.toString(),
-          lon: params.lon.toString(),
-          startDate: params.startDate,
-          time: params.time,
-          ...(params.endDate && { endDate: params.endDate }),
-          unitsTemp: params.unitsTemp,
-          unitsWind: params.unitsWind,
-          thresholdHot: params.thresholds.hot.toString(),
-          thresholdCold: params.thresholds.cold.toString(),
-          thresholdWindy: params.thresholds.windy.toString(),
-          thresholdWet: params.thresholds.wet.toString(),
-          thresholdUncomfortable: params.thresholds.uncomfortable.toString(),
-          ...(params.locationName && { locationName: params.locationName }),
-        }).toString()
-
-        const response = await fetch(`/api/assess?${queryString}`)
-
-        if (!response.ok) {
-          throw new Error("Failed to fetch weather risk assessment")
-        }
-
-        const data = await response.json()
-        setResults(data)
+      if (!response.ok) {
+        throw new Error("Failed to fetch weather risk assessment")
       }
+
+      const data = await response.json()
+      setResults(data)
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred")
     } finally {
@@ -126,7 +56,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen flex flex-col weather-bg">
-      <Header mockMode={mockMode} onMockModeChange={setMockMode} />
+      <Header />
 
       <main className="flex-1 container mx-auto px-4 py-8 max-w-7xl">
         <div className="grid lg:grid-cols-[320px_1fr] gap-6">

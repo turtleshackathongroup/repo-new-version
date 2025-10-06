@@ -214,6 +214,41 @@ export async function GET(request: NextRequest) {
         .filter((value): value is number => value !== undefined)
     }
 
+    const getNearestSeriesValue = (
+      series: number[] | undefined,
+      targetIndex: number,
+      candidateIndices: number[],
+    ) => {
+      if (!series || candidateIndices.length === 0) {
+        return undefined
+      }
+
+      let bestIndex = -1
+      let bestDistance = Number.POSITIVE_INFINITY
+      let bestValue: number | undefined
+
+      for (const index of candidateIndices) {
+        const value = getSeriesValue(series, index)
+
+        if (value === undefined) {
+          continue
+        }
+
+        const distance = Math.abs(index - targetIndex)
+
+        if (
+          distance < bestDistance ||
+          (distance === bestDistance && bestIndex !== -1 && index > bestIndex)
+        ) {
+          bestIndex = index
+          bestDistance = distance
+          bestValue = value
+        }
+      }
+
+      return bestValue
+    }
+
     const temperatureSeries = hourly?.temperature_2m
     const apparentSeries = hourly?.apparent_temperature
     const humiditySeries = hourly?.relative_humidity_2m
@@ -226,6 +261,7 @@ export async function GET(request: NextRequest) {
     const selectedHumidity = getSeriesValue(humiditySeries, resolvedTargetIndex)
     const selectedPrecipMm = getSeriesValue(precipSeries, resolvedTargetIndex)
     const selectedWindMs = getSeriesValue(windSeries, resolvedTargetIndex)
+    const selectedGustMs = getSeriesValue(gustSeries, resolvedTargetIndex)
 
     const dayTemperaturesC = gatherSeriesValues(temperatureSeries)
     const dayHumidity = gatherSeriesValues(humiditySeries)
@@ -248,7 +284,12 @@ export async function GET(request: NextRequest) {
 
     const maxTempC = dayTemperaturesC.length > 0 ? Math.max(...dayTemperaturesC) : temperatureC
     const minTempC = dayTemperaturesC.length > 0 ? Math.min(...dayTemperaturesC) : temperatureC
-    const gustMs = dayGustsMs.length > 0 ? Math.max(...dayGustsMs) : windSpeedMs
+    const gustMs =
+      selectedGustMs ??
+      getNearestSeriesValue(gustSeries, resolvedTargetIndex, dayIndices) ??
+      (dayGustsMs.length > 0
+        ? dayGustsMs.reduce((acc, value) => acc + value, 0) / dayGustsMs.length
+        : windSpeedMs)
     const totalPrecipMm = dayPrecipMm.reduce((acc, value) => acc + value, 0)
 
     const temperature = unitsTemp === "F" ? CELSIUS_TO_FAHRENHEIT(temperatureC) : temperatureC

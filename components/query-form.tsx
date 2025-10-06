@@ -48,9 +48,7 @@ export function QueryForm({ onSubmit, loading }: QueryFormProps) {
   const [thresholds, setThresholds] = useState(() => getDefaultThresholds("F", "MPH"))
   const previousTempUnit = useRef<"C" | "F">("F")
   const previousWindUnit = useRef<"MS" | "MPH">("MPH")
-  const handleThresholdChange = (key: keyof typeof thresholds) => (
-    event: React.ChangeEvent<HTMLInputElement>,
-  ) => {
+  const handleThresholdChange = (key: keyof typeof thresholds) => (event: React.ChangeEvent<HTMLInputElement>) => {
     const { value } = event.target
 
     setThresholds((prev) => ({
@@ -68,11 +66,7 @@ export function QueryForm({ onSubmit, loading }: QueryFormProps) {
       ...prev,
       hot: convertTemperatureThreshold(prev.hot, previousTempUnit.current, unitsTemp),
       cold: convertTemperatureThreshold(prev.cold, previousTempUnit.current, unitsTemp),
-      uncomfortable: convertTemperatureThreshold(
-        prev.uncomfortable,
-        previousTempUnit.current,
-        unitsTemp,
-      ),
+      uncomfortable: convertTemperatureThreshold(prev.uncomfortable, previousTempUnit.current, unitsTemp),
       wet: convertPrecipThreshold(prev.wet, previousTempUnit.current, unitsTemp),
     }))
 
@@ -139,26 +133,15 @@ export function QueryForm({ onSubmit, loading }: QueryFormProps) {
           const filteredSuggestions = data
             .map((item) => {
               const address = item.address ?? {}
-              const locality =
-                address.city ||
-                address.town ||
-                address.village ||
-                address.municipality ||
-                address.hamlet
+              const locality = address.city || address.town || address.village || address.municipality || address.hamlet
 
               if (!locality) {
                 return null
               }
 
-              const state =
-                address.state ||
-                address.state_district ||
-                address.region ||
-                address.province
+              const state = address.state || address.state_district || address.region || address.province
               const country = address.country
-              const formattedName = [locality, state, country]
-                .filter((part) => Boolean(part))
-                .join(", ")
+              const formattedName = [locality, state, country].filter((part) => Boolean(part)).join(", ")
 
               return {
                 id: item.place_id.toString(),
@@ -170,8 +153,7 @@ export function QueryForm({ onSubmit, loading }: QueryFormProps) {
             .filter((item): item is GeocodingSuggestion => item !== null)
 
           const uniqueSuggestions = filteredSuggestions.filter(
-            (suggestion, index, self) =>
-              index === self.findIndex((other) => other.name === suggestion.name),
+            (suggestion, index, self) => index === self.findIndex((other) => other.name === suggestion.name),
           )
 
           setSuggestions(uniqueSuggestions)
@@ -278,6 +260,16 @@ export function QueryForm({ onSubmit, loading }: QueryFormProps) {
     previousTempUnit.current = "F"
     previousWindUnit.current = "MPH"
     setThresholds(getDefaultThresholds("F", "MPH"))
+  }
+
+  const formatTimeTo12Hour = (time24: string): string => {
+    if (!time24) return ""
+
+    const [hours, minutes] = time24.split(":").map(Number)
+    const period = hours >= 12 ? "PM" : "AM"
+    const hours12 = hours % 12 || 12 // Convert 0 to 12 for midnight, and 13-23 to 1-11
+
+    return `${hours12}:${minutes.toString().padStart(2, "0")} ${period}`
   }
 
   return (
@@ -445,7 +437,7 @@ export function QueryForm({ onSubmit, loading }: QueryFormProps) {
                       )}
                     >
                       <Clock className="mr-2 h-4 w-4 flex-shrink-0" />
-                      <span className="flex-1 text-center">{time || "Select time"}</span>
+                      <span className="flex-1 text-center">{time ? formatTimeTo12Hour(time) : "Select time"}</span>
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-4 animate-in fade-in-0 zoom-in-95" align="start">
@@ -679,9 +671,7 @@ export function QueryForm({ onSubmit, loading }: QueryFormProps) {
                         onChange={handleThresholdChange("wet")}
                         className="text-sm bg-card transition-all duration-200 focus:border-primary"
                       />
-                      <span className="text-xs text-muted-foreground">
-                        {unitsTemp === "F" ? "in" : "mm"}
-                      </span>
+                      <span className="text-xs text-muted-foreground">{unitsTemp === "F" ? "in" : "mm"}</span>
                     </div>
                   </div>
                 </div>
