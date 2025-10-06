@@ -1,7 +1,7 @@
 "use client"
 
 import { ThemeToggle } from "./theme-toggle"
-import { Button } from "@/components/ui/button"
+import { Switch } from "@/components/ui/switch"
 import { Cloud, Database } from "lucide-react"
 
 interface HeaderProps {
@@ -25,15 +25,26 @@ export function Header({ mockMode, onMockModeChange }: HeaderProps) {
           </div>
 
           <div className="flex items-center gap-3">
-            <Button
-              variant={mockMode ? "default" : "outline"}
-              size="sm"
-              onClick={() => onMockModeChange(!mockMode)}
-              className="gap-2"
-            >
-              <Database className="w-4 h-4" />
-              {mockMode ? "Mock Data" : "Live API"}
-            </Button>
+            <div className="flex items-center gap-3 px-4 py-2 rounded-lg border border-border bg-background/50 backdrop-blur-sm">
+              <div className="flex items-center gap-2">
+                <Database className="w-4 h-4 text-muted-foreground" />
+                <span
+                  className={`text-sm font-medium transition-colors ${mockMode ? "text-foreground" : "text-muted-foreground"}`}
+                >
+                  Mock Data
+                </span>
+              </div>
+              <Switch
+                checked={!mockMode}
+                onCheckedChange={(checked) => onMockModeChange(!checked)}
+                className="data-[state=checked]:bg-primary"
+              />
+              <span
+                className={`text-sm font-medium transition-colors ${!mockMode ? "text-foreground" : "text-muted-foreground"}`}
+              >
+                Live API
+              </span>
+            </div>
             <ThemeToggle />
           </div>
         </div>
