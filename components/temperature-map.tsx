@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Card } from "@/components/ui/card"
 import type { Driver } from "@/types"
 
@@ -14,7 +14,10 @@ interface TemperatureMapProps {
 
 export function TemperatureMap({ drivers, tempUnit, lat, lon, locationName }: TemperatureMapProps) {
   const [isMounted, setIsMounted] = useState(false)
-  const [mapInstance, setMapInstance] = useState<any>(null)
+  const mapRef = useRef<any>(null)
+  const nasaLayerRef = useRef<any>(null)
+  const [nasaLayerDate, setNasaLayerDate] = useState<string | null>(null)
+  const [nasaStatus, setNasaStatus] = useState<"loading" | "active" | "failed">("loading")
 
   // Extract temperature data
   const temp = drivers.find((d) => d.name === "Temperature")?.value || 0
@@ -29,11 +32,15 @@ export function TemperatureMap({ drivers, tempUnit, lat, lon, locationName }: Te
   useEffect(() => {
     if (!isMounted) return
 
-    let map: any
     let marker: any
+    let isEffectActive = true
 
     const initMap = async () => {
       const L = (await import("leaflet")).default
+
+      if (!isEffectActive) {
+        return
+      }
 
       // Fix for default marker icon
       delete (L.Icon.Default.prototype as any)._getIconUrl
@@ -44,24 +51,111 @@ export function TemperatureMap({ drivers, tempUnit, lat, lon, locationName }: Te
       })
 
       const mapElement = document.getElementById("temperature-map")
-      if (!mapElement) return
+      if (!mapElement || !isEffectActive) return
 
-      map = L.map(mapElement).setView([lat, lon], 6)
+      const existingMap = mapRef.current
+      if (existingMap) {
+        existingMap.remove()
+        mapRef.current = null
+      }
+
+      const map = L.map(mapElement).setView([lat, lon], 6)
+      mapRef.current = map
 
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
         opacity: 0.7,
       }).addTo(map)
 
-      // This provides actual real-time temperature data from weather stations
-      L.tileLayer(
-        "https://tile.openweathermap.org/map/temp_new/{z}/{x}/{y}.png?appid=8d3f4ca3ba012c87309e0b8ecb37be1b",
-        {
-          attribution: 'Temperature data &copy; <a href="https://openweathermap.org">OpenWeatherMap</a>',
-          opacity: 0.6,
-          maxZoom: 19,
-        },
-      ).addTo(map)
+      const fallbackDates = Array.from({ length: 10 }, (_, index) => {
+        const date = new Date()
+        date.setDate(date.getDate() - index)
+        return date.toISOString().split("T")[0]
+      })
+
+      const climatologyLayer = {
+        id: "MOD_LSTD_CLIM_M",
+        label: "Climatology",
+        buildUrl: (date: string) =>
+          `https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/MOD_LSTD_CLIM_M/default/${date}/EPSG4326_1km/{z}/{y}/{x}.png`,
+        maxZoom: 7,
+        tileSize: 512,
+        tms: true,
+      }
+
+      const realtimeLayer = {
+        id: "MODIS_Terra_Land_Surface_Temp_Day",
+        label: "Daily",
+        buildUrl: (date: string) =>
+          `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/wmts.cgi?service=WMTS&request=GetTile&version=1.0.0&layer=MODIS_Terra_Land_Surface_Temp_Day&style=default&tilematrixset=GoogleMapsCompatible_Level9&format=image%2Fpng&TileMatrix={z}&TileCol={x}&TileRow={y}&TIME=${date}`,
+        maxZoom: 9,
+        tileSize: 256,
+        tms: false,
+      }
+
+      const nasaToken = process.env.NEXT_PUBLIC_NASA_GIBS_TOKEN
+
+      const appendToken = (url: string) =>
+        nasaToken ? `${url}&token=${encodeURIComponent(nasaToken)}` : url
+
+      const attachLayer = (
+        layerConfig: typeof realtimeLayer,
+        dates: string[],
+        dateIndex: number,
+      ) => {
+        if (!isEffectActive || !mapRef.current) {
+          return
+        }
+
+        const layerDate = dates[dateIndex]
+        const rawUrl = layerConfig.buildUrl(layerDate)
+        const url = layerConfig.id === realtimeLayer.id ? appendToken(rawUrl) : rawUrl
+
+        const layer = L.tileLayer(url, {
+          attribution:
+            'Temperature imagery &copy; <a href="https://earthdata.nasa.gov/eosdis/science-system-description/eosdis-components/gibs">NASA EOSDIS GIBS</a>',
+          opacity: 0.85,
+          maxNativeZoom: layerConfig.maxZoom,
+          maxZoom: layerConfig.maxZoom,
+          tileSize: layerConfig.tileSize,
+          zIndex: 450,
+          tms: layerConfig.tms,
+          crossOrigin: true,
+        })
+
+        const handleTileLoad = () => {
+          if (!isEffectActive) return
+          setNasaStatus("active")
+          setNasaLayerDate(layerDate)
+        }
+
+        const handleTileError = () => {
+          if (!isEffectActive) return
+          layer.off("tileerror", handleTileError)
+          layer.off("load", handleTileLoad)
+          if (mapRef.current && mapRef.current.hasLayer(layer)) {
+            mapRef.current.removeLayer(layer)
+          }
+
+          const nextIndex = dateIndex + 1
+          if (nextIndex < dates.length) {
+            attachLayer(layerConfig, dates, nextIndex)
+          } else if (layerConfig.id === realtimeLayer.id) {
+            attachLayer(climatologyLayer, ["2013-01-01"], 0)
+          } else {
+            setNasaStatus("failed")
+          }
+        }
+
+        layer.on("load", handleTileLoad)
+        layer.on("tileerror", handleTileError)
+
+        layer.addTo(map)
+        nasaLayerRef.current = layer
+      }
+
+      setNasaStatus("loading")
+      attachLayer(realtimeLayer, fallbackDates, 0)
 
       marker = L.marker([lat, lon]).addTo(map)
       marker.bindPopup(`
@@ -84,14 +178,21 @@ export function TemperatureMap({ drivers, tempUnit, lat, lon, locationName }: Te
         </div>
       `)
 
-      setMapInstance(map)
     }
 
     initMap()
 
     return () => {
+      isEffectActive = false
+      const map = mapRef.current
       if (map) {
+        const nasaLayer = nasaLayerRef.current
+        if (nasaLayer && map.hasLayer(nasaLayer)) {
+          map.removeLayer(nasaLayer)
+        }
         map.remove()
+        mapRef.current = null
+        nasaLayerRef.current = null
       }
     }
   }, [isMounted, lat, lon, locationName, temp, tempUnit, feelsLike, minTemp, maxTemp])
@@ -124,8 +225,16 @@ export function TemperatureMap({ drivers, tempUnit, lat, lon, locationName }: Te
 
           {/* Legend overlay */}
           <div className="absolute bottom-4 right-4 bg-card/95 backdrop-blur-sm rounded-lg px-4 py-3 shadow-lg border border-border z-[1000]">
-            <p className="text-xs font-semibold mb-2 text-foreground">Temperature Overlay</p>
-            <p className="text-[10px] text-muted-foreground mb-2">Real-time data from weather stations</p>
+            <p className="text-xs font-semibold mb-2 text-foreground">NASA Surface Temperature</p>
+            <p className="text-[10px] text-muted-foreground mb-2">
+              {nasaStatus === "loading" && "Loading latest NASA imagery"}
+              {nasaStatus === "active" &&
+                (nasaLayerDate
+                  ? `MODIS Terra land surface temperature for ${nasaLayerDate}`
+                  : "NASA imagery active")}
+              {nasaStatus === "failed" &&
+                "Unable to load NASA tiles — check network access or credentials."}
+            </p>
             <div className="flex gap-1">
               <div className="flex flex-col items-center">
                 <div className="w-6 h-6 rounded" style={{ background: "#9d5cff" }} />
