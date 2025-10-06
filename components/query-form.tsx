@@ -336,12 +336,14 @@ export function QueryForm({ onSubmit, loading }: QueryFormProps) {
                       id="startDate"
                       variant="outline"
                       className={cn(
-                        "w-full justify-start text-left font-normal bg-card transition-all duration-200 hover:bg-accent",
+                        "w-full justify-center text-center font-normal bg-card transition-all duration-200 hover:bg-accent px-4",
                         !startDate && "text-muted-foreground",
                       )}
                     >
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {startDate ? format(startDate, "MMM dd, yyyy") : <span>Pick a date</span>}
+                      <CalendarIcon className="mr-2 h-4 w-4 flex-shrink-0" />
+                      <span className="flex-1 text-center">
+                        {startDate ? format(startDate, "MMM dd, yyyy") : "Pick a date"}
+                      </span>
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0 animate-in fade-in-0 zoom-in-95" align="start">
@@ -365,11 +367,11 @@ export function QueryForm({ onSubmit, loading }: QueryFormProps) {
                     <Button
                       variant="outline"
                       className={cn(
-                        "w-full justify-start text-left font-normal bg-card transition-all duration-200 hover:bg-accent",
+                        "w-full justify-center text-center font-normal bg-card transition-all duration-200 hover:bg-accent px-4",
                       )}
                     >
-                      <Clock className="mr-2 h-4 w-4" />
-                      {time || "Select time"}
+                      <Clock className="mr-2 h-4 w-4 flex-shrink-0" />
+                      <span className="flex-1 text-center">{time || "Select time"}</span>
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-4 animate-in fade-in-0 zoom-in-95" align="start">
@@ -430,12 +432,14 @@ export function QueryForm({ onSubmit, loading }: QueryFormProps) {
                       id="endDate"
                       variant="outline"
                       className={cn(
-                        "w-full justify-start text-left font-normal bg-card transition-all duration-200 hover:bg-accent",
+                        "w-full justify-center text-center font-normal bg-card transition-all duration-200 hover:bg-accent px-4",
                         !endDate && "text-muted-foreground",
                       )}
                     >
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {endDate ? format(endDate, "MMM dd, yyyy") : <span>Pick end date</span>}
+                      <CalendarIcon className="mr-2 h-4 w-4 flex-shrink-0" />
+                      <span className="flex-1 text-center">
+                        {endDate ? format(endDate, "MMM dd, yyyy") : "Pick end date"}
+                      </span>
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0 animate-in fade-in-0 zoom-in-95" align="start">
