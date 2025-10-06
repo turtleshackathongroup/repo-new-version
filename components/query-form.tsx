@@ -87,16 +87,48 @@ export function QueryForm({ onSubmit, loading }: QueryFormProps) {
             display_name: string
             lat: string
             lon: string
+            address?: Record<string, string>
           }>
 
-          setSuggestions(
-            data.map((item) => ({
-              id: item.place_id.toString(),
-              name: item.display_name,
-              lat: item.lat,
-              lon: item.lon,
-            })),
+          const filteredSuggestions = data
+            .map((item) => {
+              const address = item.address ?? {}
+              const locality =
+                address.city ||
+                address.town ||
+                address.village ||
+                address.municipality ||
+                address.hamlet
+
+              if (!locality) {
+                return null
+              }
+
+              const state =
+                address.state ||
+                address.state_district ||
+                address.region ||
+                address.province
+              const country = address.country
+              const formattedName = [locality, state, country]
+                .filter((part) => Boolean(part))
+                .join(", ")
+
+              return {
+                id: item.place_id.toString(),
+                name: formattedName,
+                lat: item.lat,
+                lon: item.lon,
+              }
+            })
+            .filter((item): item is GeocodingSuggestion => item !== null)
+
+          const uniqueSuggestions = filteredSuggestions.filter(
+            (suggestion, index, self) =>
+              index === self.findIndex((other) => other.name === suggestion.name),
           )
+
+          setSuggestions(uniqueSuggestions)
           setActiveSuggestionIndex(-1)
         })
         .catch((error) => {
