@@ -16,6 +16,10 @@ Your project is live at:
 
 **[https://vercel.com/wrmschessclub-1128s-projects/v0-remix-of-weather-risk-dashboard-fz](https://vercel.com/wrmschessclub-1128s-projects/v0-remix-of-weather-risk-dashboard-fz)**
 
+### NASA imagery access tokens
+
+If you have a NASA Earthdata application token for the surface temperature tiles, add it as a server environment variable named `NASA_GIBS_TOKEN`. Tiles are now proxied through a Next.js API route so the token never ships to the browser, which avoids Vercel's v0 security warning about exposing sensitive environment variables in client bundles.
+
 ## Build your app
 
 Continue building your app on:
