@@ -63,36 +63,6 @@ const extractHourFromKey = (key: string) => {
   return Number.isFinite(hour) ? hour : 0
 }
 
-const selectKeyForSeries = (series: Record<string, number | string>, dateKey: string, targetHour: number) => {
-  const keys = Object.keys(series)
-  const candidateKeys = keys.filter((key) => key.includes(dateKey))
-  const pool = candidateKeys.length > 0 ? candidateKeys : keys
-
-  if (pool.length === 0) {
-    return { key: "", hour: targetHour }
-  }
-
-  const selectedKey = pool.reduce((bestKey, currentKey) => {
-    if (!bestKey) return currentKey
-    const bestHour = extractHourFromKey(bestKey)
-    const currentHour = extractHourFromKey(currentKey)
-    const bestDiff = Math.abs(bestHour - targetHour)
-    const currentDiff = Math.abs(currentHour - targetHour)
-
-    if (currentDiff < bestDiff) {
-      return currentKey
-    }
-
-    if (currentDiff === bestDiff && currentHour > bestHour) {
-      return currentKey
-    }
-
-    return bestKey
-  }, pool[0])
-
-  return { key: selectedKey, hour: extractHourFromKey(selectedKey) }
-}
-
 const INVALID_POWER_VALUES = new Set([-999, -888, -777, -699, -666, -9999, 9999])
 
 const isValidPowerValue = (value: number) => {
@@ -130,8 +100,93 @@ const parseSeriesValue = (series: Record<string, number | string> | undefined, k
   return parsed
 }
 
-const gatherDayValues = (series: Record<string, number | string> | undefined, dateKey: string) => {
+const extractDateKey = (key: string) => {
+  const digits = key.replace(/\D/g, "")
+  return digits.slice(0, 8)
+}
+
+const selectKeyForSeries = (
+  series: Record<string, number | string> | undefined,
+  preferredDateKey: string,
+  targetHour: number,
+) => {
   if (!series) {
+    return { key: "", hour: targetHour, dateKey: preferredDateKey }
+  }
+
+  const entries = Object.keys(series)
+    .map((key) => ({
+      key,
+      dateKey: extractDateKey(key),
+      hour: extractHourFromKey(key),
+      value: parseSeriesValue(series, key),
+    }))
+    .filter((entry) => entry.dateKey.length === 8 && entry.value !== undefined)
+
+  if (entries.length === 0) {
+    return { key: "", hour: targetHour, dateKey: preferredDateKey }
+  }
+
+  const preferredEntries = entries.filter((entry) => entry.dateKey === preferredDateKey)
+  const entriesByDate = new Map<string, typeof entries>
+
+  for (const entry of entries) {
+    const list = entriesByDate.get(entry.dateKey) ?? []
+    list.push(entry)
+    entriesByDate.set(entry.dateKey, list)
+  }
+
+  let pool = preferredEntries
+
+  if (pool.length === 0) {
+    const preferredDateNumber = Number.parseInt(preferredDateKey, 10)
+    const sortedDates = Array.from(entriesByDate.keys()).sort((a, b) => Number.parseInt(a, 10) - Number.parseInt(b, 10))
+    const pastOrSame = sortedDates.filter((dateKey) => Number.parseInt(dateKey, 10) <= preferredDateNumber)
+    const future = sortedDates.filter((dateKey) => Number.parseInt(dateKey, 10) > preferredDateNumber)
+
+    if (pastOrSame.length > 0) {
+      const fallbackDate = pastOrSame[pastOrSame.length - 1]
+      pool = entriesByDate.get(fallbackDate) ?? []
+    } else if (future.length > 0) {
+      pool = entriesByDate.get(future[0]) ?? []
+    }
+  }
+
+  if (pool.length === 0) {
+    pool = entries
+  }
+
+  const selectedEntry = pool.reduce((best, current) => {
+    if (!best) return current
+    const bestDiff = Math.abs(best.hour - targetHour)
+    const currentDiff = Math.abs(current.hour - targetHour)
+
+    if (currentDiff < bestDiff) {
+      return current
+    }
+
+    if (currentDiff === bestDiff) {
+      if (current.dateKey > best.dateKey) {
+        return current
+      }
+
+      if (current.hour > best.hour) {
+        return current
+      }
+    }
+
+    return best
+  }, pool[0])
+
+  return {
+    key: selectedEntry.key,
+    hour: selectedEntry.hour,
+    dateKey: selectedEntry.dateKey,
+  }
+}
+
+const gatherDayValues = (series: Record<string, number | string> | undefined, dateKey: string) => {
+  if (!series || !dateKey) {
     return []
   }
 
@@ -199,25 +254,39 @@ export async function GET(request: NextRequest) {
       throw new Error("NASA POWER API response did not include temperature data")
     }
 
-    const { key: selectedKey, hour: selectedHour } = selectKeyForSeries(parameters.T2M, dateKeyStart, targetHour)
+    const temperatureSelection = selectKeyForSeries(parameters.T2M, dateKeyStart, targetHour)
 
-    const dayTemperaturesC = gatherDayValues(parameters.T2M, dateKeyStart)
-    const dayWindsMs = gatherDayValues(parameters.WS2M, dateKeyStart)
-    const dayHumidity = gatherDayValues(parameters.RH2M, dateKeyStart)
-    const dayPrecipMmRaw = gatherDayValues(parameters.PRECTOTCORR, dateKeyStart)
+    if (!temperatureSelection.key) {
+      throw new Error("NASA POWER API did not include valid temperature readings for the requested window")
+    }
+
+    const observationDateKey = temperatureSelection.dateKey || dateKeyStart
+    const observationDateIso =
+      observationDateKey.length === 8
+        ? `${observationDateKey.slice(0, 4)}-${observationDateKey.slice(4, 6)}-${observationDateKey.slice(6, 8)}`
+        : startDate
+
+    const windSelection = selectKeyForSeries(parameters.WS2M, observationDateKey, targetHour)
+    const humiditySelection = selectKeyForSeries(parameters.RH2M, observationDateKey, targetHour)
+    const precipSelection = selectKeyForSeries(parameters.PRECTOTCORR, observationDateKey, targetHour)
+
+    const dayTemperaturesC = gatherDayValues(parameters.T2M, temperatureSelection.dateKey)
+    const dayWindsMs = gatherDayValues(parameters.WS2M, windSelection.dateKey)
+    const dayHumidity = gatherDayValues(parameters.RH2M, humiditySelection.dateKey)
+    const dayPrecipMmRaw = gatherDayValues(parameters.PRECTOTCORR, precipSelection.dateKey)
     const dayPrecipMm = dayPrecipMmRaw.map((value) => (value >= 0 ? value : 0))
 
     const temperatureC =
-      parseSeriesValue(parameters.T2M, selectedKey) ?? dayTemperaturesC[0] ?? 0
+      parseSeriesValue(parameters.T2M, temperatureSelection.key) ?? dayTemperaturesC[0] ?? 0
     const windSpeedMs =
-      parseSeriesValue(parameters.WS2M, selectedKey) ?? dayWindsMs[0] ?? 0
+      parseSeriesValue(parameters.WS2M, windSelection.key) ?? dayWindsMs[0] ?? 0
     const humidityRaw =
-      parseSeriesValue(parameters.RH2M, selectedKey) ??
+      parseSeriesValue(parameters.RH2M, humiditySelection.key) ??
       (dayHumidity.length > 0
         ? dayHumidity.reduce((acc, value) => acc + value, 0) / dayHumidity.length
         : 0)
     const humidity = Math.min(Math.max(humidityRaw, 0), 100)
-    const precipMmRaw = parseSeriesValue(parameters.PRECTOTCORR, selectedKey)
+    const precipMmRaw = parseSeriesValue(parameters.PRECTOTCORR, precipSelection.key)
     const precipMm =
       precipMmRaw !== undefined && precipMmRaw >= 0
         ? precipMmRaw
@@ -253,7 +322,7 @@ export async function GET(request: NextRequest) {
         lon,
         startDate,
         endDate,
-        observationTime: `${startDate}T${selectedHour.toString().padStart(2, "0")}:00Z`,
+        observationTime: `${observationDateIso}T${temperatureSelection.hour.toString().padStart(2, "0")}:00Z`,
         units: {
           temp: unitsTemp,
           wind: unitsWind,
