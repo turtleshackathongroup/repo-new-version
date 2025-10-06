@@ -10,6 +10,7 @@ import { MapPlaceholder } from "@/components/map-placeholder"
 import { ExplanationPanel } from "@/components/explanation-panel"
 import { Footer } from "@/components/footer"
 import { Cloud } from "lucide-react"
+import { TemperatureMap } from "@/components/temperature-map"
 import type { ApiResponse, QueryParams } from "@/types"
 
 export default function Home() {
@@ -206,6 +207,13 @@ export default function Home() {
                     locationName={results.meta.locationName}
                   />
                 </div>
+                <TemperatureMap
+                  drivers={results.drivers}
+                  tempUnit={results.meta.units.temp}
+                  lat={results.meta.lat}
+                  lon={results.meta.lon}
+                  locationName={results.meta.locationName}
+                />
                 <ExplanationPanel explanation={results.explanation} disclaimer={results.disclaimer} />
               </>
             )}
