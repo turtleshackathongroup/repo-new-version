@@ -11,6 +11,8 @@ import { ExplanationPanel } from "@/components/explanation-panel"
 import { Footer } from "@/components/footer"
 import { Cloud } from "lucide-react"
 import { TemperatureMap } from "@/components/temperature-map"
+import NasaSnapshotMap from "@/app/components/NasaSnapshotMap"
+import { Card } from "@/components/ui/card"
 import type { ApiResponse, QueryParams } from "@/types"
 
 export default function Home() {
@@ -131,11 +133,21 @@ export default function Home() {
                 <RiskChart risks={results.risks} />
                 <div className="grid lg:grid-cols-2 gap-6">
                   <DriversTable drivers={results.drivers} />
-                  <MapPlaceholder
-                    lat={results.meta.lat}
-                    lon={results.meta.lon}
-                    locationName={results.meta.locationName}
-                  />
+                  <div className="space-y-6">
+                    <MapPlaceholder
+                      lat={results.meta.lat}
+                      lon={results.meta.lon}
+                      locationName={results.meta.locationName}
+                    />
+                    <Card className="bg-card border-border p-6">
+                      <h3 className="text-lg font-semibold text-foreground mb-4">NASA Satellite Snapshot</h3>
+                      <NasaSnapshotMap
+                        lat={results.meta.lat}
+                        lon={results.meta.lon}
+                        dateISO={results.meta.startDate}
+                      />
+                    </Card>
+                  </div>
                 </div>
                 <TemperatureMap
                   drivers={results.drivers}
