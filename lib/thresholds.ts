@@ -13,9 +13,9 @@ const round = (value: number, decimals = 1) => Number(value.toFixed(decimals))
 
 const DEFAULT_TEMP_THRESHOLDS: Record<TemperatureUnit, Omit<ThresholdConfig, "windy">> = {
   F: {
-    hot: 95,
-    cold: 32,
-    wet: 0.2,
+    hot: 90,
+    cold: 45,
+    wet: .99,
     uncomfortable: 80,
   },
   C: {
