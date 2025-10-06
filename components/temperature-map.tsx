@@ -22,21 +22,6 @@ export function TemperatureMap({ drivers, tempUnit, lat, lon, locationName }: Te
   const minTemp = drivers.find((d) => d.name === "Min Temp")?.value || 0
   const feelsLike = drivers.find((d) => d.name === "Feels Like")?.value || 0
 
-  // Calculate temperature intensity (0-1) for color mapping
-  const tempRange = tempUnit === "C" ? { min: -20, max: 45 } : { min: -4, max: 113 }
-  const intensity = Math.max(0, Math.min(1, (temp - tempRange.min) / (tempRange.max - tempRange.min)))
-
-  // Get color based on temperature intensity
-  const getTemperatureColor = (intensity: number) => {
-    if (intensity < 0.2) return "#3b82f6" // blue - cold
-    if (intensity < 0.4) return "#22c55e" // green - cool
-    if (intensity < 0.6) return "#eab308" // yellow - mild
-    if (intensity < 0.8) return "#f97316" // orange - warm
-    return "#ef4444" // red - hot
-  }
-
-  const markerColor = getTemperatureColor(intensity)
-
   useEffect(() => {
     setIsMounted(true)
   }, [])
@@ -45,7 +30,7 @@ export function TemperatureMap({ drivers, tempUnit, lat, lon, locationName }: Te
     if (!isMounted) return
 
     let map: any
-    let circles: any[] = []
+    let marker: any
 
     const initMap = async () => {
       const L = (await import("leaflet")).default
@@ -61,49 +46,44 @@ export function TemperatureMap({ drivers, tempUnit, lat, lon, locationName }: Te
       const mapElement = document.getElementById("temperature-map")
       if (!mapElement) return
 
-      map = L.map(mapElement).setView([lat, lon], 10)
+      map = L.map(mapElement).setView([lat, lon], 6)
 
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        opacity: 0.7,
       }).addTo(map)
 
-      // Add temperature circles
-      const circle1 = L.circle([lat, lon], {
-        color: markerColor,
-        fillColor: markerColor,
-        fillOpacity: 0.2,
-        radius: 3000,
-        weight: 2,
-        opacity: 0.4,
-      }).addTo(map)
+      // This provides actual real-time temperature data from weather stations
+      L.tileLayer(
+        "https://tile.openweathermap.org/map/temp_new/{z}/{x}/{y}.png?appid=8d3f4ca3ba012c87309e0b8ecb37be1b",
+        {
+          attribution: 'Temperature data &copy; <a href="https://openweathermap.org">OpenWeatherMap</a>',
+          opacity: 0.6,
+          maxZoom: 19,
+        },
+      ).addTo(map)
 
-      const circle2 = L.circle([lat, lon], {
-        color: markerColor,
-        fillColor: markerColor,
-        fillOpacity: 0.4,
-        radius: 1500,
-        weight: 2,
-        opacity: 0.6,
-      }).addTo(map)
-
-      const circle3 = L.circle([lat, lon], {
-        color: markerColor,
-        fillColor: markerColor,
-        fillOpacity: 0.8,
-        radius: 800,
-        weight: 2,
-        opacity: 1,
-      }).addTo(map)
-
-      circle3.bindPopup(`
-        <div style="font-family: system-ui; padding: 4px;">
-          <p style="font-weight: 600; margin: 0 0 4px 0;">${locationName}</p>
-          <p style="font-size: 12px; margin: 2px 0; color: #666;">Temperature: ${temp}°${tempUnit}</p>
-          <p style="font-size: 12px; margin: 2px 0; color: #666;">Feels Like: ${feelsLike}°${tempUnit}</p>
+      marker = L.marker([lat, lon]).addTo(map)
+      marker.bindPopup(`
+        <div style="font-family: system-ui; padding: 8px; min-width: 180px;">
+          <p style="font-weight: 600; margin: 0 0 8px 0; font-size: 14px;">${locationName}</p>
+          <div style="display: grid; gap: 4px;">
+            <div style="display: flex; justify-content: space-between; font-size: 12px;">
+              <span style="color: #666;">Temperature:</span>
+              <span style="font-weight: 600;">${temp}°${tempUnit}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 12px;">
+              <span style="color: #666;">Feels Like:</span>
+              <span style="font-weight: 600;">${feelsLike}°${tempUnit}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 12px;">
+              <span style="color: #666;">Min / Max:</span>
+              <span style="font-weight: 600;">${minTemp}° / ${maxTemp}°${tempUnit}</span>
+            </div>
+          </div>
         </div>
       `)
 
-      circles = [circle1, circle2, circle3]
       setMapInstance(map)
     }
 
@@ -114,7 +94,7 @@ export function TemperatureMap({ drivers, tempUnit, lat, lon, locationName }: Te
         map.remove()
       }
     }
-  }, [isMounted, lat, lon, markerColor, locationName, temp, tempUnit, feelsLike])
+  }, [isMounted, lat, lon, locationName, temp, tempUnit, feelsLike, minTemp, maxTemp])
 
   if (!isMounted) {
     return (
@@ -138,33 +118,38 @@ export function TemperatureMap({ drivers, tempUnit, lat, lon, locationName }: Te
       </div>
 
       <div className="space-y-4">
-        {/* Leaflet Map */}
-        <div className="relative h-[400px] rounded-lg overflow-hidden border border-border">
+        {/* Leaflet Map with Temperature Overlay */}
+        <div className="relative h-[500px] rounded-lg overflow-hidden border border-border">
           <div id="temperature-map" className="h-full w-full" />
 
           {/* Legend overlay */}
-          <div className="absolute bottom-4 right-4 bg-card/95 backdrop-blur-sm rounded-lg px-3 py-2 shadow-lg border border-border z-[1000]">
-            <p className="text-xs font-semibold mb-2 text-foreground">Temperature Scale</p>
+          <div className="absolute bottom-4 right-4 bg-card/95 backdrop-blur-sm rounded-lg px-4 py-3 shadow-lg border border-border z-[1000]">
+            <p className="text-xs font-semibold mb-2 text-foreground">Temperature Overlay</p>
+            <p className="text-[10px] text-muted-foreground mb-2">Real-time data from weather stations</p>
             <div className="flex gap-1">
               <div className="flex flex-col items-center">
-                <div className="w-6 h-6 rounded bg-blue-500" />
-                <span className="text-[10px] text-muted-foreground mt-1">Cold</span>
+                <div className="w-6 h-6 rounded" style={{ background: "#9d5cff" }} />
+                <span className="text-[10px] text-muted-foreground mt-1">-40°</span>
               </div>
               <div className="flex flex-col items-center">
-                <div className="w-6 h-6 rounded bg-green-500" />
-                <span className="text-[10px] text-muted-foreground mt-1">Cool</span>
+                <div className="w-6 h-6 rounded" style={{ background: "#5c8aff" }} />
+                <span className="text-[10px] text-muted-foreground mt-1">-20°</span>
               </div>
               <div className="flex flex-col items-center">
-                <div className="w-6 h-6 rounded bg-yellow-500" />
-                <span className="text-[10px] text-muted-foreground mt-1">Mild</span>
+                <div className="w-6 h-6 rounded" style={{ background: "#5cffff" }} />
+                <span className="text-[10px] text-muted-foreground mt-1">0°</span>
               </div>
               <div className="flex flex-col items-center">
-                <div className="w-6 h-6 rounded bg-orange-500" />
-                <span className="text-[10px] text-muted-foreground mt-1">Warm</span>
+                <div className="w-6 h-6 rounded" style={{ background: "#5cff5c" }} />
+                <span className="text-[10px] text-muted-foreground mt-1">20°</span>
               </div>
               <div className="flex flex-col items-center">
-                <div className="w-6 h-6 rounded bg-red-500" />
-                <span className="text-[10px] text-muted-foreground mt-1">Hot</span>
+                <div className="w-6 h-6 rounded" style={{ background: "#ffff5c" }} />
+                <span className="text-[10px] text-muted-foreground mt-1">30°</span>
+              </div>
+              <div className="flex flex-col items-center">
+                <div className="w-6 h-6 rounded" style={{ background: "#ff5c5c" }} />
+                <span className="text-[10px] text-muted-foreground mt-1">40°</span>
               </div>
             </div>
           </div>
