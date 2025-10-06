@@ -2,9 +2,15 @@ import { type NextRequest, NextResponse } from "next/server"
 import type { ApiResponse } from "@/types"
 import { getDefaultThresholds } from "@/lib/thresholds"
 
-interface PowerApiResponse {
-  properties?: {
-    parameter?: Record<string, Record<string, number | string>>
+interface OpenMeteoResponse {
+  hourly?: {
+    time?: string[]
+    temperature_2m?: number[]
+    apparent_temperature?: number[]
+    relative_humidity_2m?: number[]
+    precipitation?: number[]
+    wind_speed_10m?: number[]
+    wind_gusts_10m?: number[]
   }
 }
 
@@ -56,91 +62,6 @@ const computeProbability = (value: number, threshold: number, direction: "above"
   return Number(probability.toFixed(2))
 }
 
-const extractHourFromKey = (key: string) => {
-  const digits = key.replace(/\D/g, "")
-  const hourString = digits.slice(-2)
-  const hour = Number.parseInt(hourString, 10)
-  return Number.isFinite(hour) ? hour : 0
-}
-
-const selectKeyForSeries = (series: Record<string, number | string>, dateKey: string, targetHour: number) => {
-  const keys = Object.keys(series)
-  const candidateKeys = keys.filter((key) => key.includes(dateKey))
-  const pool = candidateKeys.length > 0 ? candidateKeys : keys
-
-  if (pool.length === 0) {
-    return { key: "", hour: targetHour }
-  }
-
-  const selectedKey = pool.reduce((bestKey, currentKey) => {
-    if (!bestKey) return currentKey
-    const bestHour = extractHourFromKey(bestKey)
-    const currentHour = extractHourFromKey(currentKey)
-    const bestDiff = Math.abs(bestHour - targetHour)
-    const currentDiff = Math.abs(currentHour - targetHour)
-
-    if (currentDiff < bestDiff) {
-      return currentKey
-    }
-
-    if (currentDiff === bestDiff && currentHour > bestHour) {
-      return currentKey
-    }
-
-    return bestKey
-  }, pool[0])
-
-  return { key: selectedKey, hour: extractHourFromKey(selectedKey) }
-}
-
-const INVALID_POWER_VALUES = new Set([-999, -888, -777, -699, -666, -9999, 9999])
-
-const isValidPowerValue = (value: number) => {
-  if (!Number.isFinite(value)) {
-    return false
-  }
-
-  if (INVALID_POWER_VALUES.has(value)) {
-    return false
-  }
-
-  if (Math.abs(value) >= 900 || value <= -900) {
-    return false
-  }
-
-  return true
-}
-
-const parseSeriesValue = (series: Record<string, number | string> | undefined, key: string) => {
-  if (!series || !key || !(key in series)) {
-    return undefined
-  }
-
-  const rawValue = series[key]
-  const parsed = typeof rawValue === "number" ? rawValue : Number.parseFloat(rawValue)
-
-  if (!Number.isFinite(parsed)) {
-    return undefined
-  }
-
-  if (!isValidPowerValue(parsed)) {
-    return undefined
-  }
-
-  return parsed
-}
-
-const gatherDayValues = (series: Record<string, number | string> | undefined, dateKey: string) => {
-  if (!series) {
-    return []
-  }
-
-  return Object.entries(series)
-    .filter(([key]) => key.includes(dateKey))
-    .map(([key]) => parseSeriesValue(series, key))
-    .filter((value): value is number => value !== undefined)
-}
-
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams
 
@@ -165,67 +86,169 @@ export async function GET(request: NextRequest) {
     ),
   }
 
-  const dateKeyStart = startDate.replace(/-/g, "")
-  const dateKeyEnd = endDate.replace(/-/g, "")
-  const targetHour = Number.parseInt(time.split(":")[0] || "12", 10)
-
   try {
-    const nasaUrl = new URL("https://power.larc.nasa.gov/api/temporal/hourly/point")
-    nasaUrl.search = new URLSearchParams({
-      parameters: "T2M,WS2M,RH2M,PRECTOTCORR",
-      community: "AG",
-      longitude: lon.toString(),
-      latitude: lat.toString(),
-      start: dateKeyStart,
-      end: dateKeyEnd,
-      format: "JSON",
-    }).toString()
+    const hourlyParameters = [
+      "temperature_2m",
+      "apparent_temperature",
+      "relative_humidity_2m",
+      "precipitation",
+      "wind_speed_10m",
+      "wind_gusts_10m",
+    ]
 
-    const response = await fetch(nasaUrl.toString(), {
-      headers: {
-        "Content-Type": "application/json",
-      },
-      next: { revalidate: 60 * 60 },
+    const baseSearchParams = new URLSearchParams({
+      latitude: lat.toString(),
+      longitude: lon.toString(),
+      start_date: startDate,
+      end_date: endDate,
+      hourly: hourlyParameters.join(","),
+      timezone: "UTC",
     })
 
-    if (!response.ok) {
-      throw new Error(`NASA POWER API returned ${response.status}`)
+    const fetchWeatherData = async (baseUrl: string) => {
+      const url = new URL(baseUrl)
+      url.search = baseSearchParams.toString()
+
+      const response = await fetch(url.toString(), {
+        headers: {
+          "Content-Type": "application/json",
+        },
+        next: { revalidate: 60 * 60 },
+      })
+
+      if (!response.ok) {
+        throw new Error(`Open-Meteo API returned ${response.status}`)
+      }
+
+      const json = (await response.json()) as OpenMeteoResponse
+
+      if (!json.hourly || !Array.isArray(json.hourly.time) || json.hourly.time.length === 0) {
+        throw new Error("Open-Meteo API response did not include hourly data")
+      }
+
+      return json
     }
 
-    const powerData = (await response.json()) as PowerApiResponse
-    const parameters = powerData.properties?.parameter
+    let weatherData: OpenMeteoResponse
 
-    if (!parameters || !parameters.T2M) {
-      throw new Error("NASA POWER API response did not include temperature data")
+    try {
+      weatherData = await fetchWeatherData("https://api.open-meteo.com/v1/forecast")
+    } catch (forecastError) {
+      console.warn("Open-Meteo forecast API failed, trying archive", forecastError)
+      weatherData = await fetchWeatherData("https://archive-api.open-meteo.com/v1/archive")
     }
 
-    const { key: selectedKey, hour: selectedHour } = selectKeyForSeries(parameters.T2M, dateKeyStart, targetHour)
+    const hourly = weatherData.hourly
+    const times = hourly?.time ?? []
 
-    const dayTemperaturesC = gatherDayValues(parameters.T2M, dateKeyStart)
-    const dayWindsMs = gatherDayValues(parameters.WS2M, dateKeyStart)
-    const dayHumidity = gatherDayValues(parameters.RH2M, dateKeyStart)
-    const dayPrecipMmRaw = gatherDayValues(parameters.PRECTOTCORR, dateKeyStart)
-    const dayPrecipMm = dayPrecipMmRaw.map((value) => (value >= 0 ? value : 0))
+    const normalizeTimeString = (value: string) => {
+      if (!value) return value
+      return value.includes("Z") ? value : `${value}Z`
+    }
 
-    const temperatureC =
-      parseSeriesValue(parameters.T2M, selectedKey) ?? dayTemperaturesC[0] ?? 0
-    const windSpeedMs =
-      parseSeriesValue(parameters.WS2M, selectedKey) ?? dayWindsMs[0] ?? 0
+    const parseTimestamp = (value: string) => Date.parse(normalizeTimeString(value))
+
+    const targetTimePart = time.includes(":") ? time : `${time}:00`
+    const targetTimestamp = `${startDate}T${targetTimePart}`
+    const targetMs = parseTimestamp(targetTimestamp)
+
+    const targetIndex = times.reduce((bestIndex, current, index) => {
+      if (!current) {
+        return bestIndex
+      }
+
+      const currentMs = parseTimestamp(current)
+
+      if (!Number.isFinite(currentMs)) {
+        return bestIndex
+      }
+
+      if (!Number.isFinite(targetMs)) {
+        return bestIndex >= 0 ? bestIndex : index
+      }
+
+      if (bestIndex === -1) {
+        return index
+      }
+
+      const bestMs = parseTimestamp(times[bestIndex] ?? "")
+      const bestDiff = Math.abs(bestMs - targetMs)
+      const currentDiff = Math.abs(currentMs - targetMs)
+
+      if (currentDiff < bestDiff) {
+        return index
+      }
+
+      if (currentDiff === bestDiff && currentMs > bestMs) {
+        return index
+      }
+
+      return bestIndex
+    }, -1)
+
+    const resolvedTargetIndex = targetIndex >= 0 ? targetIndex : 0
+
+    const dayIndices = times.reduce<number[]>((acc, timestamp, index) => {
+      if (typeof timestamp === "string" && timestamp.startsWith(startDate)) {
+        acc.push(index)
+      }
+      return acc
+    }, [])
+
+    const getSeriesValue = (series: number[] | undefined, index: number) => {
+      if (!series || index < 0 || index >= series.length) {
+        return undefined
+      }
+
+      const value = series[index]
+      return Number.isFinite(value) ? value : undefined
+    }
+
+    const gatherSeriesValues = (series: number[] | undefined) => {
+      if (!series) {
+        return []
+      }
+
+      return dayIndices
+        .map((index) => getSeriesValue(series, index))
+        .filter((value): value is number => value !== undefined)
+    }
+
+    const temperatureSeries = hourly?.temperature_2m
+    const apparentSeries = hourly?.apparent_temperature
+    const humiditySeries = hourly?.relative_humidity_2m
+    const precipSeries = hourly?.precipitation
+    const windSeries = hourly?.wind_speed_10m
+    const gustSeries = hourly?.wind_gusts_10m
+
+    const selectedTemperatureC = getSeriesValue(temperatureSeries, resolvedTargetIndex)
+    const selectedApparentC = getSeriesValue(apparentSeries, resolvedTargetIndex)
+    const selectedHumidity = getSeriesValue(humiditySeries, resolvedTargetIndex)
+    const selectedPrecipMm = getSeriesValue(precipSeries, resolvedTargetIndex)
+    const selectedWindMs = getSeriesValue(windSeries, resolvedTargetIndex)
+
+    const dayTemperaturesC = gatherSeriesValues(temperatureSeries)
+    const dayHumidity = gatherSeriesValues(humiditySeries)
+    const dayPrecipMm = gatherSeriesValues(precipSeries).map((value) => (value >= 0 ? value : 0))
+    const dayWindsMs = gatherSeriesValues(windSeries)
+    const dayGustsMs = gatherSeriesValues(gustSeries)
+
+    const temperatureC = selectedTemperatureC ?? dayTemperaturesC[0] ?? 0
+    const windSpeedMs = selectedWindMs ?? dayWindsMs[0] ?? 0
     const humidityRaw =
-      parseSeriesValue(parameters.RH2M, selectedKey) ??
+      selectedHumidity ??
       (dayHumidity.length > 0
         ? dayHumidity.reduce((acc, value) => acc + value, 0) / dayHumidity.length
         : 0)
     const humidity = Math.min(Math.max(humidityRaw, 0), 100)
-    const precipMmRaw = parseSeriesValue(parameters.PRECTOTCORR, selectedKey)
     const precipMm =
-      precipMmRaw !== undefined && precipMmRaw >= 0
-        ? precipMmRaw
-        : (dayPrecipMm[0] ?? 0)
+      selectedPrecipMm !== undefined && selectedPrecipMm >= 0
+        ? selectedPrecipMm
+        : dayPrecipMm[0] ?? 0
 
     const maxTempC = dayTemperaturesC.length > 0 ? Math.max(...dayTemperaturesC) : temperatureC
     const minTempC = dayTemperaturesC.length > 0 ? Math.min(...dayTemperaturesC) : temperatureC
-    const gustMs = dayWindsMs.length > 0 ? Math.max(...dayWindsMs) : windSpeedMs
+    const gustMs = dayGustsMs.length > 0 ? Math.max(...dayGustsMs) : windSpeedMs
     const totalPrecipMm = dayPrecipMm.reduce((acc, value) => acc + value, 0)
 
     const temperature = unitsTemp === "F" ? CELSIUS_TO_FAHRENHEIT(temperatureC) : temperatureC
@@ -236,8 +259,18 @@ export async function GET(request: NextRequest) {
     const precip = unitsTemp === "F" ? MM_TO_IN(precipMm) : precipMm
     const dailyPrecip = unitsTemp === "F" ? MM_TO_IN(totalPrecipMm) : totalPrecipMm
 
-    const heatIndexF = computeHeatIndex(CELSIUS_TO_FAHRENHEIT(temperatureC), humidity)
-    const heatIndex = unitsTemp === "F" ? heatIndexF : FAHRENHEIT_TO_CELSIUS(heatIndexF)
+    const heatIndexSourceC =
+      selectedApparentC ?? FAHRENHEIT_TO_CELSIUS(computeHeatIndex(CELSIUS_TO_FAHRENHEIT(temperatureC), humidity))
+    const heatIndex =
+      unitsTemp === "F" ? CELSIUS_TO_FAHRENHEIT(heatIndexSourceC) : heatIndexSourceC
+
+    const selectedTimestamp = times[resolvedTargetIndex] ?? targetTimestamp
+    const observationIso = (() => {
+      if (!selectedTimestamp) return undefined
+      const normalized = normalizeTimeString(selectedTimestamp)
+      const parsed = Number.isFinite(Date.parse(normalized)) ? new Date(normalized).toISOString() : undefined
+      return parsed
+    })()
 
     const hotProbability = computeProbability(temperature, thresholds.hot, "above")
     const coldProbability = computeProbability(temperature, thresholds.cold, "below")
@@ -253,7 +286,7 @@ export async function GET(request: NextRequest) {
         lon,
         startDate,
         endDate,
-        observationTime: `${startDate}T${selectedHour.toString().padStart(2, "0")}:00Z`,
+        observationTime: observationIso,
         units: {
           temp: unitsTemp,
           wind: unitsWind,
@@ -291,15 +324,15 @@ export async function GET(request: NextRequest) {
         },
       ],
       explanation:
-        "Observations are sourced from the NASA POWER API using the selected date, time, and coordinates. Probabilities reflect how the observed conditions relate to your configured thresholds.",
+        "Observations are sourced from the Open-Meteo API using the selected date, time, and coordinates. Probabilities reflect how the observed conditions relate to your configured thresholds.",
       disclaimer: "Prototype for Space Apps; not for operational forecasting.",
     }
 
     return NextResponse.json(responsePayload)
   } catch (error) {
-    console.error("Failed to fetch NASA POWER data", error)
+    console.error("Failed to fetch weather data", error)
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to fetch NASA POWER data" },
+      { error: error instanceof Error ? error.message : "Failed to fetch weather data" },
       { status: 502 },
     )
   }
