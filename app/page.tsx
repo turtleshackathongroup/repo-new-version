@@ -8,6 +8,7 @@ import { RiskChart } from "@/components/risk-chart"
 import { DriversTable } from "@/components/drivers-table"
 import { MapPlaceholder } from "@/components/map-placeholder"
 import { ExplanationPanel } from "@/components/explanation-panel"
+import { TemperatureMap } from "@/components/temperature-map"
 import { Footer } from "@/components/footer"
 import { Cloud } from "lucide-react"
 import type { ApiResponse, QueryParams } from "@/types"
@@ -200,11 +201,19 @@ export default function Home() {
                 <RiskChart risks={results.risks} />
                 <div className="grid lg:grid-cols-2 gap-6">
                   <DriversTable drivers={results.drivers} />
-                  <MapPlaceholder
-                    lat={results.meta.lat}
-                    lon={results.meta.lon}
-                    locationName={results.meta.locationName}
-                  />
+                  <div className="space-y-6">
+                    <MapPlaceholder
+                      lat={results.meta.lat}
+                      lon={results.meta.lon}
+                      locationName={results.meta.locationName}
+                    />
+                    <TemperatureMap
+                      lat={results.meta.lat}
+                      lon={results.meta.lon}
+                      locationName={results.meta.locationName}
+                      date={results.meta.startDate}
+                    />
+                  </div>
                 </div>
                 <ExplanationPanel explanation={results.explanation} disclaimer={results.disclaimer} />
               </>
