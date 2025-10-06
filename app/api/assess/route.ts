@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import type { ApiResponse } from "@/types"
+import { getDefaultThresholds } from "@/lib/thresholds"
 
 interface PowerApiResponse {
   properties?: {
@@ -12,6 +13,17 @@ const FAHRENHEIT_TO_CELSIUS = (value: number) => ((value - 32) * 5) / 9
 const MS_TO_MPH = (value: number) => value * 2.236936
 const MM_TO_IN = (value: number) => value / 25.4
 const roundTo = (value: number, decimals = 1) => Number(value.toFixed(decimals))
+
+const parseThresholdParam = (params: URLSearchParams, key: string, fallback: number) => {
+  const value = params.get(key)
+
+  if (value === null) {
+    return fallback
+  }
+
+  const parsed = Number.parseFloat(value)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
 
 const computeHeatIndex = (tempF: number, humidity: number) => {
   if (tempF < 80) {
@@ -81,18 +93,41 @@ const selectKeyForSeries = (series: Record<string, number | string>, dateKey: st
   return { key: selectedKey, hour: extractHourFromKey(selectedKey) }
 }
 
-const parseSeriesValue = (series: Record<string, number | string> | undefined, key: string, fallback = 0) => {
+const INVALID_POWER_VALUES = new Set([-999, -888, -777, -699, -666, -9999, 9999])
+
+const isValidPowerValue = (value: number) => {
+  if (!Number.isFinite(value)) {
+    return false
+  }
+
+  if (INVALID_POWER_VALUES.has(value)) {
+    return false
+  }
+
+  if (Math.abs(value) >= 900 || value <= -900) {
+    return false
+  }
+
+  return true
+}
+
+const parseSeriesValue = (series: Record<string, number | string> | undefined, key: string) => {
   if (!series || !key || !(key in series)) {
-    return fallback
+    return undefined
   }
 
   const rawValue = series[key]
-  if (typeof rawValue === "number") {
-    return rawValue
+  const parsed = typeof rawValue === "number" ? rawValue : Number.parseFloat(rawValue)
+
+  if (!Number.isFinite(parsed)) {
+    return undefined
   }
 
-  const parsed = Number.parseFloat(rawValue)
-  return Number.isFinite(parsed) ? parsed : fallback
+  if (!isValidPowerValue(parsed)) {
+    return undefined
+  }
+
+  return parsed
 }
 
 const gatherDayValues = (series: Record<string, number | string> | undefined, dateKey: string) => {
@@ -102,8 +137,8 @@ const gatherDayValues = (series: Record<string, number | string> | undefined, da
 
   return Object.entries(series)
     .filter(([key]) => key.includes(dateKey))
-    .map(([, value]) => (typeof value === "number" ? value : Number.parseFloat(value)))
-    .filter((value) => Number.isFinite(value))
+    .map(([key]) => parseSeriesValue(series, key))
+    .filter((value): value is number => value !== undefined)
 }
 
 export async function GET(request: NextRequest) {
@@ -117,12 +152,17 @@ export async function GET(request: NextRequest) {
   const locationName = searchParams.get("locationName")
   const unitsTemp = (searchParams.get("unitsTemp") || "F") as "C" | "F"
   const unitsWind = (searchParams.get("unitsWind") || "MPH") as "MS" | "MPH"
+  const defaultThresholds = getDefaultThresholds(unitsTemp, unitsWind)
   const thresholds = {
-    hot: Number.parseFloat(searchParams.get("thresholdHot") || "35"),
-    cold: Number.parseFloat(searchParams.get("thresholdCold") || "0"),
-    windy: Number.parseFloat(searchParams.get("thresholdWindy") || "10"),
-    wet: Number.parseFloat(searchParams.get("thresholdWet") || "10"),
-    uncomfortable: Number.parseFloat(searchParams.get("thresholdUncomfortable") || "32"),
+    hot: parseThresholdParam(searchParams, "thresholdHot", defaultThresholds.hot),
+    cold: parseThresholdParam(searchParams, "thresholdCold", defaultThresholds.cold),
+    windy: parseThresholdParam(searchParams, "thresholdWindy", defaultThresholds.windy),
+    wet: parseThresholdParam(searchParams, "thresholdWet", defaultThresholds.wet),
+    uncomfortable: parseThresholdParam(
+      searchParams,
+      "thresholdUncomfortable",
+      defaultThresholds.uncomfortable,
+    ),
   }
 
   const dateKeyStart = startDate.replace(/-/g, "")
@@ -161,14 +201,27 @@ export async function GET(request: NextRequest) {
 
     const { key: selectedKey, hour: selectedHour } = selectKeyForSeries(parameters.T2M, dateKeyStart, targetHour)
 
-    const temperatureC = parseSeriesValue(parameters.T2M, selectedKey, 0)
-    const windSpeedMs = parseSeriesValue(parameters.WS2M, selectedKey, 0)
-    const humidity = parseSeriesValue(parameters.RH2M, selectedKey, 0)
-    const precipMm = parseSeriesValue(parameters.PRECTOTCORR, selectedKey, 0)
-
     const dayTemperaturesC = gatherDayValues(parameters.T2M, dateKeyStart)
     const dayWindsMs = gatherDayValues(parameters.WS2M, dateKeyStart)
-    const dayPrecipMm = gatherDayValues(parameters.PRECTOTCORR, dateKeyStart)
+    const dayHumidity = gatherDayValues(parameters.RH2M, dateKeyStart)
+    const dayPrecipMmRaw = gatherDayValues(parameters.PRECTOTCORR, dateKeyStart)
+    const dayPrecipMm = dayPrecipMmRaw.map((value) => (value >= 0 ? value : 0))
+
+    const temperatureC =
+      parseSeriesValue(parameters.T2M, selectedKey) ?? dayTemperaturesC[0] ?? 0
+    const windSpeedMs =
+      parseSeriesValue(parameters.WS2M, selectedKey) ?? dayWindsMs[0] ?? 0
+    const humidityRaw =
+      parseSeriesValue(parameters.RH2M, selectedKey) ??
+      (dayHumidity.length > 0
+        ? dayHumidity.reduce((acc, value) => acc + value, 0) / dayHumidity.length
+        : 0)
+    const humidity = Math.min(Math.max(humidityRaw, 0), 100)
+    const precipMmRaw = parseSeriesValue(parameters.PRECTOTCORR, selectedKey)
+    const precipMm =
+      precipMmRaw !== undefined && precipMmRaw >= 0
+        ? precipMmRaw
+        : (dayPrecipMm[0] ?? 0)
 
     const maxTempC = dayTemperaturesC.length > 0 ? Math.max(...dayTemperaturesC) : temperatureC
     const minTempC = dayTemperaturesC.length > 0 ? Math.min(...dayTemperaturesC) : temperatureC
