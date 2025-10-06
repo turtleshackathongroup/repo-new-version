@@ -11,6 +11,7 @@ import { ExplanationPanel } from "@/components/explanation-panel"
 import { Footer } from "@/components/footer"
 import { Cloud } from "lucide-react"
 import { TemperatureMap } from "@/components/temperature-map"
+import NasaSnapshotMap from "@/components/nasa-snapshot-map"
 import type { ApiResponse, QueryParams } from "@/types"
 
 export default function Home() {
@@ -207,6 +208,11 @@ export default function Home() {
                     locationName={results.meta.locationName}
                   />
                 </div>
+                <NasaSnapshotMap
+                  lat={results.meta.lat}
+                  lon={results.meta.lon}
+                  dateISO={results.meta.startDate}
+                />
                 <TemperatureMap
                   drivers={results.drivers}
                   tempUnit={results.meta.units.temp}
