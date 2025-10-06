@@ -226,6 +226,7 @@ export async function GET(request: NextRequest) {
     const selectedHumidity = getSeriesValue(humiditySeries, resolvedTargetIndex)
     const selectedPrecipMm = getSeriesValue(precipSeries, resolvedTargetIndex)
     const selectedWindMs = getSeriesValue(windSeries, resolvedTargetIndex)
+    const selectedGustMs = getSeriesValue(gustSeries, resolvedTargetIndex)
 
     const dayTemperaturesC = gatherSeriesValues(temperatureSeries)
     const dayHumidity = gatherSeriesValues(humiditySeries)
@@ -248,7 +249,7 @@ export async function GET(request: NextRequest) {
 
     const maxTempC = dayTemperaturesC.length > 0 ? Math.max(...dayTemperaturesC) : temperatureC
     const minTempC = dayTemperaturesC.length > 0 ? Math.min(...dayTemperaturesC) : temperatureC
-    const gustMs = dayGustsMs.length > 0 ? Math.max(...dayGustsMs) : windSpeedMs
+    const gustMs = selectedGustMs ?? (dayGustsMs.length > 0 ? Math.max(...dayGustsMs) : windSpeedMs)
     const totalPrecipMm = dayPrecipMm.reduce((acc, value) => acc + value, 0)
 
     const temperature = unitsTemp === "F" ? CELSIUS_TO_FAHRENHEIT(temperatureC) : temperatureC
